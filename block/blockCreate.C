@@ -940,7 +940,7 @@ void Foam::block::createPoints
     }
 
     Info <<"Solving Poisson";
-    for (int gridIters=0; gridIters<2; gridIters++)
+    for (int gridIters=0; gridIters<10; gridIters++)
     {
         Info << ".";
 	    int nu1 = 1, nu2 = 1;
