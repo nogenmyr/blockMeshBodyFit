@@ -567,7 +567,7 @@ void Foam::block::createPoints
 	linSystemZ.b_.resize(N, false);
     linSystemZ.x_.resize(N, false);
 
-    Info << "Solving system of size " << N <<endl;
+    Info << nl << nl << "Solving system of size " << N <<endl;
 
     // First place the point algebraically
     for (label k = 0; k <= nk; k++)
