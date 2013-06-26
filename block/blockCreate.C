@@ -942,7 +942,7 @@ void Foam::block::createPoints
     Info <<"Solving Poisson";
     for (int gridIters=0; gridIters<10; gridIters++)
     {
-        Info << ".";
+        Info << "." << flush;
 	    int nu1 = 1, nu2 = 1;
 	    scalar thetaPos = 0.1, thetaNeg = 0.4;
         // setup AMG solver
