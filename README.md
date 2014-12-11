@@ -7,3 +7,6 @@ As a solver for the linear system resulting from the Poisson equations, the code
 
 Testing:
 Do a wmake in the lib and app directory respectively. Take a OpenFOAM case, and place the provided testCase blockMeshDict file in the constant/polyMesh directory. Place the stl-file in constant/triSurface and run "blockMeshBoyFit".
+
+
+Dependencies: You need to install the boost library!
