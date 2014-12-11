@@ -22,9 +22,4 @@ blockMesh/blockMeshTopology.C
 blockMesh/blockMeshCheck.C
 blockMesh/blockMeshMerge.C
 
-amgpp-0.1.2.1/src/GaussianElimination.cpp  
-amgpp-0.1.2.1/src/MatrixCRS.cpp  
-amgpp-0.1.2.1/src/MatrixNxN.cpp  
-amgpp-0.1.2.1/src/VectorN.cpp
-
-LIB = $(FOAM_LIBBIN)/libblockMesh
+LIB = $(FOAM_USER_LIBBIN)/libblockMeshBodyFit

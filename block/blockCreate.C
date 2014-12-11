@@ -33,12 +33,14 @@ License
 
 #include "error.H"
 #include "block.H"
-#include "Lse.h"
-#include "Log.h"
-#include "AmgSolver.h"
-#include "GaussianElimination.h"
 
-unsigned int loglevel_ = WARNING;
+#include "amgcl/amgcl.hpp"
+#include "amgcl/backend/builtin.hpp"
+#include "amgcl/adapter/crs_tuple.hpp"
+#include "amgcl/coarsening/ruge_stuben.hpp"
+#include "amgcl/relaxation/damped_jacobi.hpp"
+#include "amgcl/solver/bicgstab.hpp"
+
 
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
 
@@ -551,23 +553,11 @@ void Foam::block::createPoints
     vertices_.setSize(nPoints());
     
     // Set up the generic multigrid solver for solving Poisson eqs
-	Lse linSystemX;
-	Lse linSystemY;
-	Lse linSystemZ;
-	
-	label N = (ni-1)*(nj-1)*(nk-1);
+    const label n = (ni-1)*(nj-1)*(nk-1);  //number of interior points
 
-    std::vector<std::size_t> capacities(N, 19);
-	linSystemX.b_.resize(N, false);
-    linSystemX.x_.resize(N, false);
-
-	linSystemY.b_.resize(N, false);
-    linSystemY.x_.resize(N, false);
-
-	linSystemZ.b_.resize(N, false);
-    linSystemZ.x_.resize(N, false);
-
-    Info << nl << nl << "Solving system of size " << N <<endl;
+    std::vector<double>  solutionX(n);
+    std::vector<double>  solutionY(n);
+    std::vector<double>  solutionZ(n);
 
     // First place the point algebraically
     for (label k = 0; k <= nk; k++)
@@ -683,9 +673,9 @@ void Foam::block::createPoints
                     
                     const label nbijk = vtxLabelNoBoundary(i, j, k);
 
-                    linSystemX.x_[nbijk] = vertices_[vertexNo][0];
-                    linSystemY.x_[nbijk] = vertices_[vertexNo][1];
-                    linSystemZ.x_[nbijk] = vertices_[vertexNo][2];
+                    solutionX[nbijk] = vertices_[vertexNo][0];
+                    solutionY[nbijk] = vertices_[vertexNo][1];
+                    solutionZ[nbijk] = vertices_[vertexNo][2];
                 }
             }
         }
@@ -939,28 +929,18 @@ void Foam::block::createPoints
         }
     }
 
-    Info <<"Solving Poisson";
+    scalarList val(n*19, 0.); // std::vector<double> val; // Values of nonzero entries.
+    labelList col(n*19, 0);   // std::vector<int>    col; // Column numbers of nonzero entries.
+    labelList ptr(n+1, 0);      // std::vector<int>    ptr; // Points to the start of each row in the above arrays.
+    scalarList rhsX(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+    scalarList rhsY(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+    scalarList rhsZ(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+
+    Info << nl <<"Solving Poisson";
     for (int gridIters=0; gridIters<10; gridIters++)
     {
         Info << "." << flush;
-	    int nu1 = 1, nu2 = 1;
-	    scalar thetaPos = 0.1, thetaNeg = 0.4;
-        // setup AMG solver
-        AmgSolver<GaussianElimination> amg;
-
-        // Full Multigrid
-        amg.setStartupExecution(false);
-
-        // V(1,1)-cycle
-        amg.setSmoothingParameters(nu1, nu2);
-
-        // set strong dependency thresholds for positive and negative entries
-        amg.setCoarseningParameters(thetaPos, thetaNeg);
-
-        // choose coarsening strategy from coarsening_amg1r5, coarsening_direct and coarsening_standard
-        amg.setCoarseningStrategy(AmgSolver<GaussianElimination>::coarsening_direct);
-        
-        linSystemX.A_ = MatrixCRS(N, N, capacities);
+        label Aentry = 0;
         for (label k = 1; k < nk; k++)
         {
             for (label j = 1; j < nj; j++)
@@ -1025,27 +1005,27 @@ void Foam::block::createPoints
                     {
                         dxdxi = vector
                         (
-                            (linSystemX.x_[nbip1] - linSystemX.x_[nbim1])/(2.*dxi), 
-                            (linSystemY.x_[nbip1] - linSystemY.x_[nbim1])/(2.*dxi), 
-                            (linSystemZ.x_[nbip1] - linSystemZ.x_[nbim1])/(2.*dxi)
+                            (solutionX[nbip1] - solutionX[nbim1])/(2.*dxi), 
+                            (solutionY[nbip1] - solutionY[nbim1])/(2.*dxi), 
+                            (solutionZ[nbip1] - solutionZ[nbim1])/(2.*dxi)
                         );
                     }
                     else if (i==1)
                     {
                         dxdxi = vector
                         (
-                            (linSystemX.x_[nbip1] - vertices_[im1][0])/(2.*dxi), 
-                            (linSystemY.x_[nbip1] - vertices_[im1][1])/(2.*dxi), 
-                            (linSystemZ.x_[nbip1] - vertices_[im1][2])/(2.*dxi)
+                            (solutionX[nbip1] - vertices_[im1][0])/(2.*dxi), 
+                            (solutionY[nbip1] - vertices_[im1][1])/(2.*dxi), 
+                            (solutionZ[nbip1] - vertices_[im1][2])/(2.*dxi)
                         );
                     }
                     else
                     {
                         dxdxi = vector
                         (
-                            (vertices_[ip1][0] - linSystemX.x_[nbim1])/(2.*dxi), 
-                            (vertices_[ip1][1] - linSystemY.x_[nbim1])/(2.*dxi), 
-                            (vertices_[ip1][2] - linSystemZ.x_[nbim1])/(2.*dxi)
+                            (vertices_[ip1][0] - solutionX[nbim1])/(2.*dxi), 
+                            (vertices_[ip1][1] - solutionY[nbim1])/(2.*dxi), 
+                            (vertices_[ip1][2] - solutionZ[nbim1])/(2.*dxi)
                         );
                     }
 
@@ -1053,27 +1033,27 @@ void Foam::block::createPoints
                     {
                         dxdeta = vector
                         (
-                            (linSystemX.x_[nbjp1] - linSystemX.x_[nbjm1])/(2.*deta),
-                            (linSystemY.x_[nbjp1] - linSystemY.x_[nbjm1])/(2.*deta),
-                            (linSystemZ.x_[nbjp1] - linSystemZ.x_[nbjm1])/(2.*deta)
+                            (solutionX[nbjp1] - solutionX[nbjm1])/(2.*deta),
+                            (solutionY[nbjp1] - solutionY[nbjm1])/(2.*deta),
+                            (solutionZ[nbjp1] - solutionZ[nbjm1])/(2.*deta)
                         );
                     }
                     else if (j==1)
                     {
                         dxdeta = vector
                         (
-                            (linSystemX.x_[nbjp1] - vertices_[jm1][0])/(2.*deta),
-                            (linSystemY.x_[nbjp1] - vertices_[jm1][1])/(2.*deta),
-                            (linSystemZ.x_[nbjp1] - vertices_[jm1][2])/(2.*deta)
+                            (solutionX[nbjp1] - vertices_[jm1][0])/(2.*deta),
+                            (solutionY[nbjp1] - vertices_[jm1][1])/(2.*deta),
+                            (solutionZ[nbjp1] - vertices_[jm1][2])/(2.*deta)
                         );
                     }
                     else
                     {
                         dxdeta = vector
                         (
-                            (vertices_[jp1][0] - linSystemX.x_[nbjm1])/(2.*deta),
-                            (vertices_[jp1][1] - linSystemY.x_[nbjm1])/(2.*deta),
-                            (vertices_[jp1][2] - linSystemZ.x_[nbjm1])/(2.*deta)
+                            (vertices_[jp1][0] - solutionX[nbjm1])/(2.*deta),
+                            (vertices_[jp1][1] - solutionY[nbjm1])/(2.*deta),
+                            (vertices_[jp1][2] - solutionZ[nbjm1])/(2.*deta)
                         );
                     }
 
@@ -1081,27 +1061,27 @@ void Foam::block::createPoints
                     {
                         dxdzeta = vector
                         (
-                            (linSystemX.x_[nbkp1] - linSystemX.x_[nbkm1])/(2.*dzeta),
-                            (linSystemY.x_[nbkp1] - linSystemY.x_[nbkm1])/(2.*dzeta),
-                            (linSystemZ.x_[nbkp1] - linSystemZ.x_[nbkm1])/(2.*dzeta)
+                            (solutionX[nbkp1] - solutionX[nbkm1])/(2.*dzeta),
+                            (solutionY[nbkp1] - solutionY[nbkm1])/(2.*dzeta),
+                            (solutionZ[nbkp1] - solutionZ[nbkm1])/(2.*dzeta)
                         );
                     }
                     else if (k==1)
                     {
                         dxdzeta = vector
                         (
-                            (linSystemX.x_[nbkp1] - vertices_[km1][0])/(2.*dzeta),
-                            (linSystemY.x_[nbkp1] - vertices_[km1][1])/(2.*dzeta),
-                            (linSystemZ.x_[nbkp1] - vertices_[km1][2])/(2.*dzeta)
+                            (solutionX[nbkp1] - vertices_[km1][0])/(2.*dzeta),
+                            (solutionY[nbkp1] - vertices_[km1][1])/(2.*dzeta),
+                            (solutionZ[nbkp1] - vertices_[km1][2])/(2.*dzeta)
                         );
                     }
                     else
                     {
                         dxdzeta = vector
                         (
-                            (vertices_[kp1][0] - linSystemX.x_[nbkm1])/(2.*dzeta),
-                            (vertices_[kp1][1] - linSystemY.x_[nbkm1])/(2.*dzeta),
-                            (vertices_[kp1][2] - linSystemZ.x_[nbkm1])/(2.*dzeta)
+                            (vertices_[kp1][0] - solutionX[nbkm1])/(2.*dzeta),
+                            (vertices_[kp1][1] - solutionY[nbkm1])/(2.*dzeta),
+                            (vertices_[kp1][2] - solutionZ[nbkm1])/(2.*dzeta)
                         );
                     }
 
@@ -1166,277 +1146,351 @@ void Foam::block::createPoints
                     scalar Ajp1kp1 = +a23/(2*dzeta*deta);
 
                     //Reset RHS
-                    linSystemX.b_[nbijk] = 0.;
-                    linSystemY.b_[nbijk] = 0.;
-                    linSystemZ.b_[nbijk] = 0.;
+                    rhsX[nbijk] = 0.;
+                    rhsY[nbijk] = 0.;
+                    rhsZ[nbijk] = 0.;
                     
 
                     if (i==1)//Boundary points
                     {
-                        linSystemX.b_[nbijk] -= vertices_[im1][0]*Aim1;
-                        linSystemY.b_[nbijk] -= vertices_[im1][1]*Aim1;
-                        linSystemZ.b_[nbijk] -= vertices_[im1][2]*Aim1;
+                        rhsX[nbijk] -= vertices_[im1][0]*Aim1;
+                        rhsY[nbijk] -= vertices_[im1][1]*Aim1;
+                        rhsZ[nbijk] -= vertices_[im1][2]*Aim1;
                         nbim1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[im1jm1][0]*Aim1jm1;
-                        linSystemY.b_[nbijk] -= vertices_[im1jm1][1]*Aim1jm1;
-                        linSystemZ.b_[nbijk] -= vertices_[im1jm1][2]*Aim1jm1;
+                        rhsX[nbijk] -= vertices_[im1jm1][0]*Aim1jm1;
+                        rhsY[nbijk] -= vertices_[im1jm1][1]*Aim1jm1;
+                        rhsZ[nbijk] -= vertices_[im1jm1][2]*Aim1jm1;
                         nbim1jm1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[im1jp1][0]*Aim1jp1;
-                        linSystemY.b_[nbijk] -= vertices_[im1jp1][1]*Aim1jp1;
-                        linSystemZ.b_[nbijk] -= vertices_[im1jp1][2]*Aim1jp1;
+                        rhsX[nbijk] -= vertices_[im1jp1][0]*Aim1jp1;
+                        rhsY[nbijk] -= vertices_[im1jp1][1]*Aim1jp1;
+                        rhsZ[nbijk] -= vertices_[im1jp1][2]*Aim1jp1;
                         nbim1jp1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[im1km1][0]*Aim1km1;
-                        linSystemY.b_[nbijk] -= vertices_[im1km1][1]*Aim1km1;
-                        linSystemZ.b_[nbijk] -= vertices_[im1km1][2]*Aim1km1;
+                        rhsX[nbijk] -= vertices_[im1km1][0]*Aim1km1;
+                        rhsY[nbijk] -= vertices_[im1km1][1]*Aim1km1;
+                        rhsZ[nbijk] -= vertices_[im1km1][2]*Aim1km1;
                         nbim1km1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[im1kp1][0]*Aim1kp1;
-                        linSystemY.b_[nbijk] -= vertices_[im1kp1][1]*Aim1kp1;
-                        linSystemZ.b_[nbijk] -= vertices_[im1kp1][2]*Aim1kp1;
+                        rhsX[nbijk] -= vertices_[im1kp1][0]*Aim1kp1;
+                        rhsY[nbijk] -= vertices_[im1kp1][1]*Aim1kp1;
+                        rhsZ[nbijk] -= vertices_[im1kp1][2]*Aim1kp1;
                         nbim1kp1 = -1;
                     }
                     if (i==ni-1)
                     {
-                        linSystemX.b_[nbijk] -= vertices_[ip1][0]*Aip1;
-                        linSystemY.b_[nbijk] -= vertices_[ip1][1]*Aip1;
-                        linSystemZ.b_[nbijk] -= vertices_[ip1][2]*Aip1;
+                        rhsX[nbijk] -= vertices_[ip1][0]*Aip1;
+                        rhsY[nbijk] -= vertices_[ip1][1]*Aip1;
+                        rhsZ[nbijk] -= vertices_[ip1][2]*Aip1;
                         nbip1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[ip1jm1][0]*Aip1jm1;
-                        linSystemY.b_[nbijk] -= vertices_[ip1jm1][1]*Aip1jm1;
-                        linSystemZ.b_[nbijk] -= vertices_[ip1jm1][2]*Aip1jm1;
+                        rhsX[nbijk] -= vertices_[ip1jm1][0]*Aip1jm1;
+                        rhsY[nbijk] -= vertices_[ip1jm1][1]*Aip1jm1;
+                        rhsZ[nbijk] -= vertices_[ip1jm1][2]*Aip1jm1;
                         nbip1jm1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[ip1jp1][0]*Aip1jp1;
-                        linSystemY.b_[nbijk] -= vertices_[ip1jp1][1]*Aip1jp1;
-                        linSystemZ.b_[nbijk] -= vertices_[ip1jp1][2]*Aip1jp1;
+                        rhsX[nbijk] -= vertices_[ip1jp1][0]*Aip1jp1;
+                        rhsY[nbijk] -= vertices_[ip1jp1][1]*Aip1jp1;
+                        rhsZ[nbijk] -= vertices_[ip1jp1][2]*Aip1jp1;
                         nbip1jp1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[ip1km1][0]*Aip1km1;
-                        linSystemY.b_[nbijk] -= vertices_[ip1km1][1]*Aip1km1;
-                        linSystemZ.b_[nbijk] -= vertices_[ip1km1][2]*Aip1km1;
+                        rhsX[nbijk] -= vertices_[ip1km1][0]*Aip1km1;
+                        rhsY[nbijk] -= vertices_[ip1km1][1]*Aip1km1;
+                        rhsZ[nbijk] -= vertices_[ip1km1][2]*Aip1km1;
                         nbip1km1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[ip1kp1][0]*Aip1kp1;
-                        linSystemY.b_[nbijk] -= vertices_[ip1kp1][1]*Aip1kp1;
-                        linSystemZ.b_[nbijk] -= vertices_[ip1kp1][2]*Aip1kp1;
+                        rhsX[nbijk] -= vertices_[ip1kp1][0]*Aip1kp1;
+                        rhsY[nbijk] -= vertices_[ip1kp1][1]*Aip1kp1;
+                        rhsZ[nbijk] -= vertices_[ip1kp1][2]*Aip1kp1;
                         nbip1kp1 = -1;
                     }
                     if (j==1)
                     {
-                        linSystemX.b_[nbijk] -= vertices_[jm1][0]*Ajm1;
-                        linSystemY.b_[nbijk] -= vertices_[jm1][1]*Ajm1;
-                        linSystemZ.b_[nbijk] -= vertices_[jm1][2]*Ajm1;
+                        rhsX[nbijk] -= vertices_[jm1][0]*Ajm1;
+                        rhsY[nbijk] -= vertices_[jm1][1]*Ajm1;
+                        rhsZ[nbijk] -= vertices_[jm1][2]*Ajm1;
                         nbjm1 = -1;
                         if(nbim1jm1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[im1jm1][0]*Aim1jm1;
-                            linSystemY.b_[nbijk] -= vertices_[im1jm1][1]*Aim1jm1;
-                            linSystemZ.b_[nbijk] -= vertices_[im1jm1][2]*Aim1jm1;
+                            rhsX[nbijk] -= vertices_[im1jm1][0]*Aim1jm1;
+                            rhsY[nbijk] -= vertices_[im1jm1][1]*Aim1jm1;
+                            rhsZ[nbijk] -= vertices_[im1jm1][2]*Aim1jm1;
                             nbim1jm1 = -1;
                         }
                         if(nbip1jm1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[ip1jm1][0]*Aip1jm1;
-                            linSystemY.b_[nbijk] -= vertices_[ip1jm1][1]*Aip1jm1;
-                            linSystemZ.b_[nbijk] -= vertices_[ip1jm1][2]*Aip1jm1;
+                            rhsX[nbijk] -= vertices_[ip1jm1][0]*Aip1jm1;
+                            rhsY[nbijk] -= vertices_[ip1jm1][1]*Aip1jm1;
+                            rhsZ[nbijk] -= vertices_[ip1jm1][2]*Aip1jm1;
                             nbip1jm1 = -1;
                         }
-                        linSystemX.b_[nbijk] -= vertices_[jm1km1][0]*Ajm1km1;
-                        linSystemY.b_[nbijk] -= vertices_[jm1km1][1]*Ajm1km1;
-                        linSystemZ.b_[nbijk] -= vertices_[jm1km1][2]*Ajm1km1;
+                        rhsX[nbijk] -= vertices_[jm1km1][0]*Ajm1km1;
+                        rhsY[nbijk] -= vertices_[jm1km1][1]*Ajm1km1;
+                        rhsZ[nbijk] -= vertices_[jm1km1][2]*Ajm1km1;
                         nbjm1km1 = -1;
                         
-                        linSystemX.b_[nbijk] -= vertices_[jm1kp1][0]*Ajm1kp1;
-                        linSystemY.b_[nbijk] -= vertices_[jm1kp1][1]*Ajm1kp1;
-                        linSystemZ.b_[nbijk] -= vertices_[jm1kp1][2]*Ajm1kp1;
+                        rhsX[nbijk] -= vertices_[jm1kp1][0]*Ajm1kp1;
+                        rhsY[nbijk] -= vertices_[jm1kp1][1]*Ajm1kp1;
+                        rhsZ[nbijk] -= vertices_[jm1kp1][2]*Ajm1kp1;
                         nbjm1kp1 = -1;
                     }
                     if (j==nj-1)
                     {
-                        linSystemX.b_[nbijk] -= vertices_[jp1][0]*Ajp1;
-                        linSystemY.b_[nbijk] -= vertices_[jp1][1]*Ajp1;
-                        linSystemZ.b_[nbijk] -= vertices_[jp1][2]*Ajp1;
+                        rhsX[nbijk] -= vertices_[jp1][0]*Ajp1;
+                        rhsY[nbijk] -= vertices_[jp1][1]*Ajp1;
+                        rhsZ[nbijk] -= vertices_[jp1][2]*Ajp1;
                         nbjp1 = -1;
                         if(nbim1jp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[im1jp1][0]*Aim1jp1;
-                            linSystemY.b_[nbijk] -= vertices_[im1jp1][1]*Aim1jp1;
-                            linSystemZ.b_[nbijk] -= vertices_[im1jp1][2]*Aim1jp1;
+                            rhsX[nbijk] -= vertices_[im1jp1][0]*Aim1jp1;
+                            rhsY[nbijk] -= vertices_[im1jp1][1]*Aim1jp1;
+                            rhsZ[nbijk] -= vertices_[im1jp1][2]*Aim1jp1;
                             nbim1jp1 = -1;
                         }
                         if(nbip1jp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[ip1jp1][0]*Aip1jp1;
-                            linSystemY.b_[nbijk] -= vertices_[ip1jp1][1]*Aip1jp1;
-                            linSystemZ.b_[nbijk] -= vertices_[ip1jp1][2]*Aip1jp1;
+                            rhsX[nbijk] -= vertices_[ip1jp1][0]*Aip1jp1;
+                            rhsY[nbijk] -= vertices_[ip1jp1][1]*Aip1jp1;
+                            rhsZ[nbijk] -= vertices_[ip1jp1][2]*Aip1jp1;
                             nbip1jp1 = -1;
                         }
-                        linSystemX.b_[nbijk] -= vertices_[jp1km1][0]*Ajp1km1;
-                        linSystemY.b_[nbijk] -= vertices_[jp1km1][1]*Ajp1km1;
-                        linSystemZ.b_[nbijk] -= vertices_[jp1km1][2]*Ajp1km1;
+                        rhsX[nbijk] -= vertices_[jp1km1][0]*Ajp1km1;
+                        rhsY[nbijk] -= vertices_[jp1km1][1]*Ajp1km1;
+                        rhsZ[nbijk] -= vertices_[jp1km1][2]*Ajp1km1;
                         nbjp1km1 = -1;
-                        linSystemX.b_[nbijk] -= vertices_[jp1kp1][0]*Ajp1kp1;
-                        linSystemY.b_[nbijk] -= vertices_[jp1kp1][1]*Ajp1kp1;
-                        linSystemZ.b_[nbijk] -= vertices_[jp1kp1][2]*Ajp1kp1;
+                        rhsX[nbijk] -= vertices_[jp1kp1][0]*Ajp1kp1;
+                        rhsY[nbijk] -= vertices_[jp1kp1][1]*Ajp1kp1;
+                        rhsZ[nbijk] -= vertices_[jp1kp1][2]*Ajp1kp1;
                         nbjp1kp1 = -1;
                     }
                     if (k==1)
                     {
-                        linSystemX.b_[nbijk] -= vertices_[km1][0]*Akm1;
-                        linSystemY.b_[nbijk] -= vertices_[km1][1]*Akm1;
-                        linSystemZ.b_[nbijk] -= vertices_[km1][2]*Akm1;
+                        rhsX[nbijk] -= vertices_[km1][0]*Akm1;
+                        rhsY[nbijk] -= vertices_[km1][1]*Akm1;
+                        rhsZ[nbijk] -= vertices_[km1][2]*Akm1;
                         nbkm1 = -1;
                         if(nbim1km1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[im1km1][0]*Aim1km1;
-                            linSystemY.b_[nbijk] -= vertices_[im1km1][1]*Aim1km1;
-                            linSystemZ.b_[nbijk] -= vertices_[im1km1][2]*Aim1km1;
+                            rhsX[nbijk] -= vertices_[im1km1][0]*Aim1km1;
+                            rhsY[nbijk] -= vertices_[im1km1][1]*Aim1km1;
+                            rhsZ[nbijk] -= vertices_[im1km1][2]*Aim1km1;
                             nbim1km1 = -1;
                         }
                         if(nbip1km1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[ip1km1][0]*Aip1km1;
-                            linSystemY.b_[nbijk] -= vertices_[ip1km1][1]*Aip1km1;
-                            linSystemZ.b_[nbijk] -= vertices_[ip1km1][2]*Aip1km1;
+                            rhsX[nbijk] -= vertices_[ip1km1][0]*Aip1km1;
+                            rhsY[nbijk] -= vertices_[ip1km1][1]*Aip1km1;
+                            rhsZ[nbijk] -= vertices_[ip1km1][2]*Aip1km1;
                             nbip1km1 = -1;
                         }
                         if(nbjm1km1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[jm1km1][0]*Ajm1km1;
-                            linSystemY.b_[nbijk] -= vertices_[jm1km1][1]*Ajm1km1;
-                            linSystemZ.b_[nbijk] -= vertices_[jm1km1][2]*Ajm1km1;
+                            rhsX[nbijk] -= vertices_[jm1km1][0]*Ajm1km1;
+                            rhsY[nbijk] -= vertices_[jm1km1][1]*Ajm1km1;
+                            rhsZ[nbijk] -= vertices_[jm1km1][2]*Ajm1km1;
                             nbjm1km1 = -1;
                         }
                         if(nbjp1km1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[jp1km1][0]*Ajp1km1;
-                            linSystemY.b_[nbijk] -= vertices_[jp1km1][1]*Ajp1km1;
-                            linSystemZ.b_[nbijk] -= vertices_[jp1km1][2]*Ajp1km1;
+                            rhsX[nbijk] -= vertices_[jp1km1][0]*Ajp1km1;
+                            rhsY[nbijk] -= vertices_[jp1km1][1]*Ajp1km1;
+                            rhsZ[nbijk] -= vertices_[jp1km1][2]*Ajp1km1;
                             nbjp1km1 = -1;
                         }
                     }
                     if (k==nk-1)
                     {
-                        linSystemX.b_[nbijk] -= vertices_[kp1][0]*Akp1;
-                        linSystemY.b_[nbijk] -= vertices_[kp1][1]*Akp1;
-                        linSystemZ.b_[nbijk] -= vertices_[kp1][2]*Akp1;
+                        rhsX[nbijk] -= vertices_[kp1][0]*Akp1;
+                        rhsY[nbijk] -= vertices_[kp1][1]*Akp1;
+                        rhsZ[nbijk] -= vertices_[kp1][2]*Akp1;
                         nbkp1 = -1;
                         if(nbim1kp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[im1kp1][0]*Aim1kp1;
-                            linSystemY.b_[nbijk] -= vertices_[im1kp1][1]*Aim1kp1;
-                            linSystemZ.b_[nbijk] -= vertices_[im1kp1][2]*Aim1kp1;
+                            rhsX[nbijk] -= vertices_[im1kp1][0]*Aim1kp1;
+                            rhsY[nbijk] -= vertices_[im1kp1][1]*Aim1kp1;
+                            rhsZ[nbijk] -= vertices_[im1kp1][2]*Aim1kp1;
                             nbim1kp1 = -1;
                         }
                         if(nbip1kp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[ip1kp1][0]*Aip1kp1;
-                            linSystemY.b_[nbijk] -= vertices_[ip1kp1][1]*Aip1kp1;
-                            linSystemZ.b_[nbijk] -= vertices_[ip1kp1][2]*Aip1kp1;
+                            rhsX[nbijk] -= vertices_[ip1kp1][0]*Aip1kp1;
+                            rhsY[nbijk] -= vertices_[ip1kp1][1]*Aip1kp1;
+                            rhsZ[nbijk] -= vertices_[ip1kp1][2]*Aip1kp1;
                             nbip1kp1 = -1;
                         }
                         if(nbjm1kp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[jm1kp1][0]*Ajm1kp1;
-                            linSystemY.b_[nbijk] -= vertices_[jm1kp1][1]*Ajm1kp1;
-                            linSystemZ.b_[nbijk] -= vertices_[jm1kp1][2]*Ajm1kp1;
+                            rhsX[nbijk] -= vertices_[jm1kp1][0]*Ajm1kp1;
+                            rhsY[nbijk] -= vertices_[jm1kp1][1]*Ajm1kp1;
+                            rhsZ[nbijk] -= vertices_[jm1kp1][2]*Ajm1kp1;
                             nbjm1kp1 = -1;
                         }
                         if(nbjp1kp1>=0)
                         {
-                            linSystemX.b_[nbijk] -= vertices_[jp1kp1][0]*Ajp1kp1;
-                            linSystemY.b_[nbijk] -= vertices_[jp1kp1][1]*Ajp1kp1;
-                            linSystemZ.b_[nbijk] -= vertices_[jp1kp1][2]*Ajp1kp1;
+                            rhsX[nbijk] -= vertices_[jp1kp1][0]*Ajp1kp1;
+                            rhsY[nbijk] -= vertices_[jp1kp1][1]*Ajp1kp1;
+                            rhsZ[nbijk] -= vertices_[jp1kp1][2]*Ajp1kp1;
                             nbjp1kp1 = -1;
                         }
                     }
+                    ptr[nbijk] = Aentry;
                     if(nbjm1km1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjm1km1, Ajm1km1);
+                        val[Aentry] = Ajm1km1;
+                        col[Aentry] = nbjm1km1;
+                        Aentry++;
                     }
                     if(nbim1km1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbim1km1, Aim1km1);
+                        val[Aentry] = Aim1km1;
+                        col[Aentry] = nbim1km1;
+                        Aentry++;
                     }
                     if(nbkm1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbkm1, Akm1);
+                        val[Aentry] = Akm1;
+                        col[Aentry] = nbkm1;
+                        Aentry++;
                     }
                     if(nbip1km1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbip1km1, Aip1km1);
+                        val[Aentry] = Aip1km1;
+                        col[Aentry] = nbip1km1;
+                        Aentry++;
                     }
                     if(nbjp1km1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjp1km1, Ajp1km1);
+                        val[Aentry] = Ajp1km1;
+                        col[Aentry] = nbjp1km1;
+                        Aentry++;
                     }
                     if(nbim1jm1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbim1jm1, Aim1jm1);
+                        val[Aentry] = Aim1jm1;
+                        col[Aentry] = nbim1jm1;
+                        Aentry++;
                     }
                     if(nbjm1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjm1, Ajm1);
+                        val[Aentry] = Ajm1;
+                        col[Aentry] = nbjm1;
+                        Aentry++;
                     }
                     if(nbip1jm1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbip1jm1, Aip1jm1);
+                        val[Aentry] = Aip1jm1;
+                        col[Aentry] = nbip1jm1;
+                        Aentry++;
                     }
 
                     if(nbim1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbim1, Aim1);
+                        val[Aentry] = Aim1;
+                        col[Aentry] = nbim1;
+                        Aentry++;
                     }
                     
-                    linSystemX.A_.appendRowElement(nbijk, nbijk, Aijk);
+                    val[Aentry] = Aijk;
+                    col[Aentry] = nbijk;
+                    Aentry++;
                     
                     if(nbip1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbip1, Aip1);
+                        val[Aentry] = Aip1;
+                        col[Aentry] = nbip1;
+                        Aentry++;
                     }
                     if(nbim1jp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbim1jp1, Aim1jp1);
+                        val[Aentry] = Aim1jp1;
+                        col[Aentry] = nbim1jp1;
+                        Aentry++;
                     }
                     if(nbjp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjp1, Ajp1);
+                        val[Aentry] = Ajp1;
+                        col[Aentry] = nbjp1;
+                        Aentry++;
                     }
                     if(nbip1jp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbip1jp1, Aip1jp1);
+                        val[Aentry] = Aip1jp1;
+                        col[Aentry] = nbip1jp1;
+                        Aentry++;
                     }
                     if(nbjm1kp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjm1kp1, Ajm1kp1);
+                        val[Aentry] = Ajm1kp1;
+                        col[Aentry] = nbjm1kp1;
+                        Aentry++;
                     }
                     if(nbim1kp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbim1kp1, Aim1kp1);
+                        val[Aentry] = Aim1kp1;
+                        col[Aentry] = nbim1kp1;
+                        Aentry++;
                     }
                     if(nbkp1>=0)
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbkp1, Akp1);
+                        val[Aentry] = Akp1;
+                        col[Aentry] = nbkp1;
+                        Aentry++;
                     }
                     if(nbip1kp1>=0)
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbip1kp1, Aip1kp1);
+                        val[Aentry] = Aip1kp1;
+                        col[Aentry] = nbip1kp1;
+                        Aentry++;
                     }
                     if(nbjp1kp1>=0) 
                     {
-                        linSystemX.A_.appendRowElement(nbijk, nbjp1kp1, Ajp1kp1);
+                        val[Aentry] = Ajp1kp1;
+                        col[Aentry] = nbjp1kp1;
+                        Aentry++;
                     }
                 }
             }
         }
 
-        // Copy X's matrix to Y and Z. The coeffs are the same
-        linSystemY.A_ = linSystemX.A_;
-        linSystemZ.A_ = linSystemX.A_;
-        
-	    // solve the linear systems
-        bool solvedX = amg.solve(linSystemX);
-        if (!solvedX) Info << "Could not converge X" << endl;
-        bool solvedY = amg.solve(linSystemY);
-        if (!solvedY) Info << "Could not converge Y" << endl;
-        bool solvedZ = amg.solve(linSystemZ);
-        if (!solvedZ) Info << "Could not converge Z" << endl;
+        val.resize(Aentry);
+        col.resize(Aentry);
+        ptr[n] = Aentry;
+
+        for( int a = 0; a < n; a++ )
+        {
+            solutionX[a] *= 0; // why doesn't the solver likes a reasonable guess??
+            solutionY[a] *= 0;
+            solutionZ[a] *= 0;
+        }
+
+        // Define the AMG type:
+        typedef amgcl::amg<
+            amgcl::backend::builtin<double>,
+            amgcl::coarsening::ruge_stuben,
+            amgcl::relaxation::damped_jacobi
+            > AMG;
+
+        // Construct the AMG hierarchy.
+        // Note that this step only depends on the matrix. Hence, the constructed
+        // instance may be reused for several right-hand sides.
+        // The matrix is specified as a tuple of sizes and ranges.
+
+        AMG amg( boost::tie(n, ptr, col, val) );
+
+        // Output some information about the constructed hierarchy:
+//        std::cout << amg << std::endl;
+
+        // Use BiCGStab as an iterative solver:
+        typedef amgcl::solver::bicgstab<
+            amgcl::backend::builtin<double>
+            > Solver;
+
+        // Construct the iterative solver. It needs size of the system to
+        // preallocate the required temporary structures:
+        Solver solve(n);
+
+        // Solve the system. Returns number of iterations made and the achieved residual.
+        label iters;
+        scalar resid;
+        boost::tie(iters, resid) = solve(amg, rhsX, solutionX);
+//        Info << iters << "   " << resid << endl;
+        boost::tie(iters, resid) = solve(amg, rhsY, solutionY);
+//        Info << iters << "   " << resid << endl;
+        boost::tie(iters, resid) = solve(amg, rhsZ, solutionZ);
+//        Info << iters << "   " << resid << endl;
     }
     
     // Grid solved and convered. Copy back to vertices_
@@ -1448,9 +1502,9 @@ void Foam::block::createPoints
             {
                 label ijk = vtxLabel(i, j, k);
                 label nbijk = vtxLabelNoBoundary(i, j, k);
-                vertices_[ijk][0] = linSystemX.x_[nbijk];
-                vertices_[ijk][1] = linSystemY.x_[nbijk];
-                vertices_[ijk][2] = linSystemZ.x_[nbijk];
+                vertices_[ijk][0] = solutionX[nbijk];
+                vertices_[ijk][1] = solutionY[nbijk];
+                vertices_[ijk][2] = solutionZ[nbijk];
             }
         }
     }
