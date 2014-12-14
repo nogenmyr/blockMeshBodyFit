@@ -3,7 +3,7 @@
 \\      /  F ield         | Unsupported Contributions for OpenFOAM
  \\    /   O peration     |
   \\  /    A nd           | Copyright (C) 2011 OpenFOAM Foundation
-   \\/     M anipulation  | Copyright (C) 2013 Karl-Johan Nogenmyr
+   \\/     M anipulation  | Copyright (C) 2014 Karl-Johan Nogenmyr
 -------------------------------------------------------------------------------
 2013-06-01 Karl-Johan Nogenmyr
 Implementing:
@@ -39,7 +39,7 @@ License
 #include "amgcl/adapter/crs_tuple.hpp"
 #include "amgcl/coarsening/ruge_stuben.hpp"
 #include "amgcl/relaxation/damped_jacobi.hpp"
-#include "amgcl/solver/bicgstab.hpp"
+#include "amgcl/solver/gmres.hpp"
 
 
 // * * * * * * * * * * * * * Private Member Functions  * * * * * * * * * * * //
@@ -929,12 +929,12 @@ void Foam::block::createPoints
         }
     }
 
-    scalarList val(n*19, 0.); // std::vector<double> val; // Values of nonzero entries.
-    labelList col(n*19, 0);   // std::vector<int>    col; // Column numbers of nonzero entries.
-    labelList ptr(n+1, 0);      // std::vector<int>    ptr; // Points to the start of each row in the above arrays.
-    scalarList rhsX(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
-    scalarList rhsY(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
-    scalarList rhsZ(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+    std::vector<double> val(n*19, 0.); // std::vector<double> val; // Values of nonzero entries.
+    std::vector<int> col(n*19, 0);   // std::vector<int>    col; // Column numbers of nonzero entries.
+    std::vector<int> ptr(n+1, 0);      // std::vector<int>    ptr; // Points to the start of each row in the above arrays.
+    std::vector<double> rhsX(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+    std::vector<double> rhsY(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
+    std::vector<double> rhsZ(n, 0.);    //std::vector<double> rhs; // Right-hand side of the system of equations.
 
     Info << nl <<"Solving Poisson";
     for (int gridIters=0; gridIters<10; gridIters++)
@@ -1448,14 +1448,14 @@ void Foam::block::createPoints
         val.resize(Aentry);
         col.resize(Aentry);
         ptr[n] = Aentry;
-
+/*
         for( int a = 0; a < n; a++ )
         {
             solutionX[a] *= 0; // why doesn't the solver likes a reasonable guess??
             solutionY[a] *= 0;
             solutionZ[a] *= 0;
         }
-
+*/
         // Define the AMG type:
         typedef amgcl::amg<
             amgcl::backend::builtin<double>,
@@ -1473,8 +1473,8 @@ void Foam::block::createPoints
         // Output some information about the constructed hierarchy:
 //        std::cout << amg << std::endl;
 
-        // Use BiCGStab as an iterative solver:
-        typedef amgcl::solver::bicgstab<
+        // Use GMRES as an iterative solver:
+        typedef amgcl::solver::gmres<
             amgcl::backend::builtin<double>
             > Solver;
 
