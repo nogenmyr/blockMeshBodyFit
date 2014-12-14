@@ -38,6 +38,9 @@ License
 #include "amgcl/backend/builtin.hpp"
 #include "amgcl/adapter/crs_tuple.hpp"
 #include "amgcl/coarsening/ruge_stuben.hpp"
+#include "amgcl/coarsening/pointwise_aggregates.hpp"
+#include "amgcl/coarsening/aggregation.hpp"
+#include "amgcl/coarsening/smoothed_aggregation.hpp"
 #include "amgcl/relaxation/damped_jacobi.hpp"
 #include "amgcl/solver/gmres.hpp"
 
@@ -1452,7 +1455,11 @@ void Foam::block::createPoints
         // Define the AMG type:
         typedef amgcl::amg<
             amgcl::backend::builtin<double>,
-            amgcl::coarsening::ruge_stuben,
+            amgcl::coarsening::smoothed_aggregation<amgcl::coarsening::pointwise_aggregates>, //12 s
+//            amgcl::coarsening::aggregation<amgcl::coarsening::pointwise_aggregates>, // 12 s
+//            amgcl::coarsening::aggregation<amgcl::coarsening::plain_aggregates>, // 12 s
+//            amgcl::coarsening::smoothed_aggregation<amgcl::coarsening::plain_aggregates>, // 12 s
+//            amgcl::coarsening::ruge_stuben, // 20 s
             amgcl::relaxation::damped_jacobi
             > AMG;
 
@@ -1460,8 +1467,10 @@ void Foam::block::createPoints
         // Note that this step only depends on the matrix. Hence, the constructed
         // instance may be reused for several right-hand sides.
         // The matrix is specified as a tuple of sizes and ranges.
-
-        AMG amg( boost::tie(n, ptr, col, val) );
+        AMG::params prm;
+        prm.coarse_enough = 1000;
+        AMG amg( boost::tie(n, ptr, col, val), prm );
+//        AMG amg( boost::tie(n, ptr, col, val) );
 
         // Output some information about the constructed hierarchy:
 //        std::cout << amg << std::endl;
