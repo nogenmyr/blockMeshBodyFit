@@ -1448,14 +1448,7 @@ void Foam::block::createPoints
         val.resize(Aentry);
         col.resize(Aentry);
         ptr[n] = Aentry;
-/*
-        for( int a = 0; a < n; a++ )
-        {
-            solutionX[a] *= 0; // why doesn't the solver likes a reasonable guess??
-            solutionY[a] *= 0;
-            solutionZ[a] *= 0;
-        }
-*/
+
         // Define the AMG type:
         typedef amgcl::amg<
             amgcl::backend::builtin<double>,
@@ -1485,12 +1478,20 @@ void Foam::block::createPoints
         // Solve the system. Returns number of iterations made and the achieved residual.
         label iters;
         scalar resid;
+        label allIters = 0;
         boost::tie(iters, resid) = solve(amg, rhsX, solutionX);
+        allIters += iters;
 //        Info << iters << "   " << resid << endl;
         boost::tie(iters, resid) = solve(amg, rhsY, solutionY);
+        allIters += iters;
 //        Info << iters << "   " << resid << endl;
         boost::tie(iters, resid) = solve(amg, rhsZ, solutionZ);
+        allIters += iters;
 //        Info << iters << "   " << resid << endl;
+        if (allIters == 0)
+        {
+            break;
+        }
     }
     
     // Grid solved and convered. Copy back to vertices_
