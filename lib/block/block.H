@@ -89,9 +89,6 @@ class block
 
     // Private Member Functions
 
-        //- Vertex label offset for a particular i,j,k position
-        label vtxLabel(label i, label j, label k) const;
-
         //- Vertex label offset for a particular i,j,k position on an interior mesh
         label vtxLabelNoBoundary(label i, label j, label k) const;
 
@@ -165,6 +162,9 @@ public:
             {
                 return *this;
             }
+
+            //- Vertex label offset for a particular i,j,k position
+            label vtxLabel(label i, label j, label k) const;
 
             //- Return the points for filling the block
             const pointField& points

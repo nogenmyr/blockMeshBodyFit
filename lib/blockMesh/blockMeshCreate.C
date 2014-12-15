@@ -56,6 +56,40 @@ void Foam::blockMesh::createPoints() const
             searchLength_
         );
 
+        if (verboseOutput)
+        {
+            const Vector<label>& density = blocks[blockI].meshDensity();
+
+            label v0 = blocks[blockI].vtxLabel(0, 0, 0);
+            label vi1 = blocks[blockI].vtxLabel(1, 0, 0);
+            scalar diStart = mag(blockPoints[vi1]-blockPoints[v0]);
+
+            label vinM1 = blocks[blockI].vtxLabel(density.x()-1, 0, 0);
+            label vin = blocks[blockI].vtxLabel(density.x(), 0, 0);
+            scalar diFinal = mag(blockPoints[vin]-blockPoints[vinM1]);
+
+            label vj1 = blocks[blockI].vtxLabel(0, 1, 0);
+            scalar djStart = mag(blockPoints[vj1]-blockPoints[v0]);
+            label vjnM1 = blocks[blockI].vtxLabel(0, density.y()-1, 0);
+            label vjn = blocks[blockI].vtxLabel(0, density.y(), 0);
+            scalar djFinal = mag(blockPoints[vjn]-blockPoints[vjnM1]);
+
+            label vk1 = blocks[blockI].vtxLabel(0, 0, 1);
+            scalar dkStart = mag(blockPoints[vk1]-blockPoints[v0]);
+            label vknM1 = blocks[blockI].vtxLabel(0, 0, density.z()-1);
+            label vkn = blocks[blockI].vtxLabel(0, 0, density.z());
+            scalar dkFinal = mag(blockPoints[vkn]-blockPoints[vknM1]);
+
+            Info<< "    Block " << blockI << " cell size :" << nl
+                << "        i : " << scaleFactor_*diStart << " .. "
+                << scaleFactor_*diFinal << nl
+                << "        j : " << scaleFactor_*djStart << " .. "
+                << scaleFactor_*djFinal << nl
+                << "        k : " << scaleFactor_*dkStart << " .. "
+                << scaleFactor_*dkFinal << nl
+                << endl;
+        }
+
         forAll(blockPoints, blockPointI)
         {
             points_
