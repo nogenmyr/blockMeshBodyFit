@@ -10,3 +10,5 @@ Do a wmake in the lib and app directory respectively. Take a OpenFOAM case, and 
 
 
 Dependencies: You need to install the boost library!
+
+Works with OF2.3
